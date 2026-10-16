@@ -469,39 +469,7 @@ Planned features include:
 
 These features will be added incrementally as the project develops.
 
----
 
-## 📌 Current Project Status
-
-### Completed
-
-* [x] Academic PDF text extraction
-* [x] Document chunking
-* [x] Semantic embeddings
-* [x] FAISS vector indexing
-* [x] Semantic retrieval
-* [x] LLM integration
-* [x] RAG pipeline
-* [x] FastAPI `/chat` endpoint
-* [x] Groq API integration
-* [x] Student registration, login, current profile, and logout
-* [x] PostgreSQL conversation and message persistence
-* [x] Conversation ownership and history restore
-* [x] Authenticated PDF/TXT upload and document-scoped retrieval
-* [x] Alembic migration and isolated auth/history tests
-
-### In Development
-
-* [ ] Intent detection
-* [ ] Learning modes
-* [ ] Adaptive explanation
-* [ ] Quiz generation
-* [ ] Learning-gap detection
-* [ ] Source metadata
-* [ ] Persistent vector index
-* [ ] Evaluation and performance metrics
-
----
 
 ## 👩‍💻 Project
 
