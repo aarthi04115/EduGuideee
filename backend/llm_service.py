@@ -1,29 +1,14 @@
+import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from openai import OpenAI
+import httpx
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(Path(__file__).resolve().parent / ".env")
-
-_client = None
-
-
-def get_llm_client():
-    global _client
-    if _client is not None:
-        return _client
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GROQ_API_KEY is not set. Add your Groq API key to the project environment variables."
-        )
-    _client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=api_key,
-    )
-    return _client
 
 
 def ask_llm(question, context, college_context=""):
@@ -65,7 +50,12 @@ Start with the answer. Use the retrieved excerpts as evidence only for claims
 they support; otherwise answer from general academic knowledge.
 """
 
-    client = get_llm_client()
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GROQ_API_KEY is not set. Add your Groq API key to the project environment variables."
+        )
+
     configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     candidate_models = [
         configured_model,
@@ -76,31 +66,41 @@ they support; otherwise answer from general academic knowledge.
     seen = set()
     models_to_try = [m for m in candidate_models if not (m in seen or seen.add(m))]
 
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
     last_error = None
-    for model in models_to_try:
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
+    with httpx.Client(timeout=45.0) as client:
+        for model in models_to_try:
+            try:
+                response = client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "temperature": 0.3,
                     },
-                    {
-                        "role": "user",
-                        "content": user_prompt
-                    }
-                ],
-                temperature=0.3,
-                timeout=45.0,
-            )
-            return response.choices[0].message.content
-        except Exception as exc:
-            last_error = exc
-            error_str = str(exc).lower()
-            if "model_not_found" in error_str or "does not exist" in error_str:
-                continue
-            raise
+                )
+                if response.status_code == 404 or "model_not_found" in response.text:
+                    logger.warning("Groq model %s not available, trying next candidate...", model)
+                    continue
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            except Exception as exc:
+                last_error = exc
+                error_str = str(exc).lower()
+                if "model_not_found" in error_str or "does not exist" in error_str or "404" in error_str:
+                    continue
+                raise
 
     if last_error:
         raise last_error
