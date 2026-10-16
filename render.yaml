@@ -1,0 +1,52 @@
+services:
+  # Backend Web Service (FastAPI + RAG Pipeline)
+  - type: web
+    name: eduguide-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eduguide-db
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: "lax"
+      - key: EDUGUIDE_CORS_ORIGINS
+        sync: false
+
+  # Frontend Static Site (React + Vite)
+  - type: web
+    name: eduguide-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: eduguide-backend
+          property: host
+
+databases:
+  - name: eduguide-db
+    databaseName: eduguide_db
+    user: eduguide_user
+    plan: free
