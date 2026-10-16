@@ -231,7 +231,11 @@ def readiness(db: Session = Depends(get_db)):
             status_code=503,
             detail="The database schema is not initialized. Apply the pending database migrations.",
         )
-    return {"status": "ready", "database": "available"}
+    return {
+        "status": "ready",
+        "database": "available",
+        "llm_configured": bool(os.getenv("GROQ_API_KEY")),
+    }
 
 
 @app.get("/conversations", response_model=list[ConversationResponse])
@@ -452,10 +456,17 @@ def chat(
             raise RuntimeError("The answer provider returned an empty response.")
     except Exception as error:
         logger.exception("Answer generation failed (%s): %s", type(error).__name__, error)
+        error_str = str(error)
+        if "GROQ_API_KEY" in error_str or "api_key" in error_str.lower():
+            user_msg = "EduGuide could not generate an answer: GROQ_API_KEY is not configured on Render. Please add GROQ_API_KEY to your Render environment variables."
+        elif "model_not_found" in error_str or "does not exist" in error_str:
+            user_msg = f"EduGuide could not generate an answer: Model error ({error_str[:80]})."
+        else:
+            user_msg = f"EduGuide could not generate an answer: {error_str[:120]}"
         raise HTTPException(
             status_code=502,
             detail={
-                "message": "EduGuide could not generate an answer. Your question was saved; you can retry.",
+                "message": user_msg,
                 "conversation_id": conversation.id,
             },
         ) from error
