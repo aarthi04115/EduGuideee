@@ -48,15 +48,10 @@ if DATABASE_URL:
     try:
         DATABASE_URL = _normalize_database_url(DATABASE_URL)
         parsed_database_url = make_url(DATABASE_URL)
-        if (
-            parsed_database_url.get_backend_name() == "postgresql"
-            and parsed_database_url.database != "eduguide_db"
-        ):
-            raise ValueError("DATABASE_URL must target the eduguide_db database.")
-    except ValueError:
+    except Exception as error:
         logger.error(
-            "DATABASE_URL is malformed or does not target eduguide_db; "
-            "configure a valid PostgreSQL URL."
+            "DATABASE_URL is malformed (%s); configure a valid database URL.",
+            error,
         )
         DATABASE_URL = None
 engine = None
@@ -67,7 +62,7 @@ if DATABASE_URL:
             pool_pre_ping=True,
             hide_parameters=True,
         )
-    except SQLAlchemyError as error:
+    except Exception as error:
         logger.error(
             "Unable to configure the database engine (%s).",
             type(error).__name__,
