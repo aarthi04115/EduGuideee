@@ -73,15 +73,15 @@ function jsonOptions(method, body) {
 }
 
 export function checkBackendHealth() {
-  return request('/', {}, 5000)
+  return request('/', {}, 30000)
 }
 
 export function checkDatabaseHealth() {
-  return request('/health/ready', {}, 5000)
+  return request('/health/ready', {}, 30000)
 }
 
 export async function getCsrfToken() {
-  const result = await request('/auth/csrf', {}, 10000)
+  const result = await request('/auth/csrf', {}, 30000)
   csrfToken = result.csrf_token
   return csrfToken
 }

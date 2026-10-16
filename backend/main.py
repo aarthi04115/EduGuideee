@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import uuid
@@ -49,35 +50,41 @@ ALLOWED_CONTENT_TYPES = {
 }
 
 
+def _check_db_startup():
+    if engine is None:
+        logger.warning("DATABASE_URL is not configured; database-backed endpoints are unavailable.")
+        return
+    try:
+        with engine.connect() as connection:
+            connection.execute(select(1))
+            existing_tables = set(inspect(connection).get_table_names())
+        missing_tables = set(Base.metadata.tables) - existing_tables
+        if missing_tables:
+            logger.warning(
+                "Database is reachable, but required tables are missing: %s. "
+                "Apply Alembic migrations before using database-backed endpoints.",
+                ", ".join(sorted(missing_tables)),
+            )
+        else:
+            with SessionLocal() as db:
+                document_count = initialize_materials(db)
+                logger.info(
+                    "Found %s indexed study materials; indexes will load on demand.",
+                    document_count,
+                )
+    except Exception as exc:
+        logger.warning(
+            "Database startup check failed or deferred (%s); endpoints will connect dynamically.",
+            exc,
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app):
-    if engine is not None:
-        try:
-            with engine.connect() as connection:
-                connection.execute(select(1))
-                existing_tables = set(inspect(connection).get_table_names())
-            missing_tables = set(Base.metadata.tables) - existing_tables
-            if missing_tables:
-                logger.error(
-                    "Database is reachable, but required tables are missing: %s. "
-                    "Apply Alembic migrations before using database-backed endpoints.",
-                    ", ".join(sorted(missing_tables)),
-                )
-            else:
-                with SessionLocal() as db:
-                    document_count = initialize_materials(db)
-                    logger.info(
-                        "Found %s indexed study materials; indexes will load on demand.",
-                        document_count,
-                    )
-        except SQLAlchemyError:
-            logger.exception(
-                "Database startup check failed; database-backed endpoints may be unavailable."
-            )
-    else:
-        logger.error(
-            "DATABASE_URL is not configured; database-backed endpoints are unavailable."
-        )
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_check_db_startup), timeout=5.0)
+    except Exception as exc:
+        logger.warning("Database startup check timed out or deferred (%s); server starting immediately.", exc)
     yield
 
 

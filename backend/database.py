@@ -57,10 +57,21 @@ if DATABASE_URL:
 engine = None
 if DATABASE_URL:
     try:
+        engine_kwargs = {
+            "pool_pre_ping": True,
+            "hide_parameters": True,
+        }
+        if "postgresql" in DATABASE_URL:
+            engine_kwargs.update(
+                {
+                    "pool_recycle": 300,
+                    "pool_timeout": 10,
+                    "connect_args": {"connect_timeout": 10},
+                }
+            )
         engine = create_engine(
             DATABASE_URL,
-            pool_pre_ping=True,
-            hide_parameters=True,
+            **engine_kwargs,
         )
     except Exception as error:
         logger.error(

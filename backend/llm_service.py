@@ -7,19 +7,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise RuntimeError(
-        "GROQ_API_KEY is not set. Add your Groq API key to the project .env file."
+_client = None
+
+
+def get_llm_client():
+    global _client
+    if _client is not None:
+        return _client
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GROQ_API_KEY is not set. Add your Groq API key to the project environment variables."
+        )
+    _client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=api_key,
     )
-
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-
-client = OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=GROQ_API_KEY,
-)
-
+    return _client
 
 
 def ask_llm(question, context, college_context=""):
@@ -61,8 +65,10 @@ Start with the answer. Use the retrieved excerpts as evidence only for claims
 they support; otherwise answer from general academic knowledge.
 """
 
+    client = get_llm_client()
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     response = client.chat.completions.create(
-        model=GROQ_MODEL,
+        model=model,
         messages=[
             {
                 "role": "system",

@@ -312,6 +312,7 @@ function App() {
       })
       .catch((error) => {
         if (!cancelled) {
+          sessionBootstrapRef.current = null
           if (error.status === 401) {
             setBackendStatus('online')
             setDatabaseStatus('online')
