@@ -62,16 +62,16 @@ def _check_db_startup():
         if missing_tables:
             logger.warning(
                 "Database is reachable, but required tables are missing: %s. "
-                "Apply Alembic migrations before using database-backed endpoints.",
+                "Creating missing tables automatically...",
                 ", ".join(sorted(missing_tables)),
             )
-        else:
-            with SessionLocal() as db:
-                document_count = initialize_materials(db)
-                logger.info(
-                    "Found %s indexed study materials; indexes will load on demand.",
-                    document_count,
-                )
+            Base.metadata.create_all(bind=engine)
+        with SessionLocal() as db:
+            document_count = initialize_materials(db)
+            logger.info(
+                "Found %s indexed study materials; indexes will load on demand.",
+                document_count,
+            )
     except Exception as exc:
         logger.warning(
             "Database startup check failed or deferred (%s); endpoints will connect dynamically.",

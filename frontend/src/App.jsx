@@ -270,10 +270,14 @@ function App() {
     )
   }, [conversations, searchTerm])
 
+  const [bootstrapRetry, setBootstrapRetry] = useState(0)
+
   useEffect(() => {
     let cancelled = false
-    if (!sessionBootstrapRef.current) {
-      sessionBootstrapRef.current = (async () => {
+    let retryTimer = null
+
+    async function runBootstrap(attemptsLeft = 2) {
+      try {
         await checkBackendHealth()
         let databaseError = null
         try {
@@ -282,60 +286,62 @@ function App() {
           databaseError = error
         }
         await getCsrfToken()
+        let user = null
+        let sessionError = ''
         try {
-          return { user: await getCurrentUser(), databaseError }
+          user = await getCurrentUser()
         } catch (error) {
           if (error.status === 401) {
-            return {
-              user: null,
-              databaseError,
-              authError: error.message.toLowerCase().includes('expired')
-                ? 'Your session has expired. Sign in again.'
-                : '',
-            }
+            sessionError = error.message.toLowerCase().includes('expired')
+              ? 'Your session has expired. Sign in again.'
+              : ''
+          } else {
+            throw error
           }
-          if (databaseError) throw databaseError
-          throw error
         }
-      })()
-    }
-    sessionBootstrapRef.current
-      .then(({ user, databaseError, authError: sessionError }) => {
         if (cancelled) return
         setBackendStatus('online')
         setDatabaseStatus(databaseError ? 'offline' : 'online')
-        setAuthError(sessionError || '')
+        setAuthError(sessionError)
         if (user) {
           setCurrentUser(user)
           setAuthState('authenticated')
         } else {
           setAuthState('unauthenticated')
         }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          sessionBootstrapRef.current = null
-          if (error.status === 401) {
-            setBackendStatus('online')
-            setDatabaseStatus('online')
-            setAuthState('unauthenticated')
-          } else if (error.status === 503) {
-            setBackendStatus('online')
-            setDatabaseStatus('offline')
-            setAuthError(error.message)
-            setAuthState('unauthenticated')
-          } else {
-            setBackendStatus('offline')
-            setDatabaseStatus('checking')
-            setAuthError(error.message)
-            setAuthState('unauthenticated')
-          }
+      } catch (error) {
+        if (cancelled) return
+        if (attemptsLeft > 0 && (error.status === 0 || error.status === 502 || error.status === 504)) {
+          setBackendStatus('checking')
+          retryTimer = setTimeout(() => {
+            if (!cancelled) void runBootstrap(attemptsLeft - 1)
+          }, 3000)
+          return
         }
-      })
+        if (error.status === 401) {
+          setBackendStatus('online')
+          setDatabaseStatus('online')
+          setAuthState('unauthenticated')
+        } else if (error.status === 503) {
+          setBackendStatus('online')
+          setDatabaseStatus('offline')
+          setAuthError(error.message)
+          setAuthState('unauthenticated')
+        } else {
+          setBackendStatus('offline')
+          setDatabaseStatus('checking')
+          setAuthError(error.message)
+          setAuthState('unauthenticated')
+        }
+      }
+    }
+
+    void runBootstrap(2)
     return () => {
       cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [])
+  }, [bootstrapRetry])
 
   useEffect(() => {
     if (authState !== 'authenticated') return undefined
@@ -1035,9 +1041,12 @@ function App() {
         backendStatus={backendStatus}
         databaseStatus={databaseStatus}
         initialError={authError}
+        onRetry={() => setBootstrapRetry((v) => v + 1)}
         onRequestError={(error) => {
           if (error.status === 503) setDatabaseStatus('offline')
-          if (error.status === 0) setBackendStatus('offline')
+          if (error.status === 0 && !error.message?.includes('timed out')) {
+            setBackendStatus('offline')
+          }
         }}
       />
     )

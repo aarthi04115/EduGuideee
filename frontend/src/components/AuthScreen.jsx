@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertCircle, ArrowRight, BookOpen, LoaderCircle, ShieldCheck } from 'lucide-react'
 import { ApiError, loginStudent, registerStudent } from '../services/api.js'
 import './AuthScreen.css'
@@ -9,6 +9,7 @@ export default function AuthScreen({
   databaseStatus,
   initialError,
   onRequestError,
+  onRetry,
 }) {
   const [mode, setMode] = useState('login')
   const [name, setName] = useState('')
@@ -17,6 +18,10 @@ export default function AuthScreen({
   const [error, setError] = useState('')
   const [bootstrapError, setBootstrapError] = useState(initialError)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    setBootstrapError(initialError)
+  }, [initialError])
 
   async function submit(event) {
     event.preventDefault()
@@ -91,13 +96,30 @@ export default function AuthScreen({
               : 'Your academic chat history will be saved to your account.'}
           </p>
 
-          {backendStatus === 'offline' && (
+          {backendStatus === 'offline' && !error && !bootstrapError && (
             <div className="auth-alert" role="alert">
               <AlertCircle size={17} />
               <span>
                 Backend unreachable. Check that the API server is running and
                 try again.
               </span>
+              {onRetry && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  style={{
+                    marginLeft: '8px',
+                    textDecoration: 'underline',
+                    background: 'none',
+                    border: 'none',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  Retry
+                </button>
+              )}
             </div>
           )}
           {databaseStatus === 'offline' && backendStatus === 'online' && (
@@ -113,10 +135,35 @@ export default function AuthScreen({
             <div className="auth-alert" role="alert">
               <AlertCircle size={17} />
               <span>
-                {bootstrapError
-                  ? `Authentication request failed: ${bootstrapError}`
-                  : error}
+                {error || bootstrapError}
               </span>
+              {onRetry && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('')
+                    setBootstrapError('')
+                    onRetry?.()
+                  }}
+                  style={{
+                    marginLeft: '8px',
+                    textDecoration: 'underline',
+                    background: 'none',
+                    border: 'none',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+          {backendStatus === 'checking' && !error && !bootstrapError && (
+            <div className="auth-status">
+              <LoaderCircle size={14} className="spin" />
+              Connecting to EduGuide...
             </div>
           )}
           {backendStatus === 'online' &&
