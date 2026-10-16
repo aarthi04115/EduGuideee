@@ -2,6 +2,14 @@ let rawBase = import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000'
 if (rawBase && !rawBase.startsWith('http://') && !rawBase.startsWith('https://')) {
   rawBase = `https://${rawBase}`
 }
+if (
+  rawBase &&
+  !rawBase.includes('.') &&
+  !rawBase.includes('localhost') &&
+  !rawBase.includes('127.0.0.1')
+) {
+  rawBase = `${rawBase}.onrender.com`
+}
 const API_BASE_URL = rawBase.replace(/\/+$/, '')
 let csrfToken
 

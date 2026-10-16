@@ -41,10 +41,7 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_BASE_URL
-        fromService:
-          type: web
-          name: eduguide-backend
-          property: host
+        value: https://eduguide-backend-7max.onrender.com
 
 databases:
   - name: eduguide-db
