@@ -103,3 +103,77 @@ test('authenticated API calls include cookies and the CSRF token', async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+test('loginStudent and registerStudent send valid JSON payloads with credentials included', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  const api = await import('./api.js')
+
+  try {
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url, options })
+      if (url.endsWith('/auth/csrf')) {
+        return new Response(JSON.stringify({ csrf_token: 'auth-nonce.auth-sig' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/auth/login')) {
+        const body = JSON.parse(options.body)
+        if (body.password === 'wrong') {
+          return new Response(JSON.stringify({ detail: 'Email or password is incorrect.' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(
+          JSON.stringify({
+            user: { id: 'user-1', email: body.email, name: 'Student' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.endsWith('/auth/register')) {
+        const body = JSON.parse(options.body)
+        return new Response(
+          JSON.stringify({
+            user: { id: 'user-2', email: body.email, name: body.name },
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('Not Found', { status: 404 })
+    }
+
+    const user = await api.loginStudent({
+      email: 'student@example.edu',
+      password: 'password123',
+    })
+    assert.equal(user.email, 'student@example.edu')
+    const loginCall = calls.find((c) => c.url.endsWith('/auth/login'))
+    assert.ok(loginCall)
+    assert.equal(loginCall.options.credentials, 'include')
+    assert.deepEqual(JSON.parse(loginCall.options.body), {
+      email: 'student@example.edu',
+      password: 'password123',
+    })
+
+    await assert.rejects(
+      api.loginStudent({
+        email: 'student@example.edu',
+        password: 'wrong',
+      }),
+      { status: 401, message: 'Email or password is incorrect.' },
+    )
+
+    const registered = await api.registerStudent({
+      name: 'New Student',
+      email: 'new@example.edu',
+      password: 'secure-password',
+    })
+    assert.equal(registered.name, 'New Student')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+

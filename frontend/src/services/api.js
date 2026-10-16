@@ -1,6 +1,8 @@
-const API_BASE_URL = (
-  import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000'
-).replace(/\/+$/, '')
+let rawBase = import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000'
+if (rawBase && !rawBase.startsWith('http://') && !rawBase.startsWith('https://')) {
+  rawBase = `https://${rawBase}`
+}
+const API_BASE_URL = rawBase.replace(/\/+$/, '')
 let csrfToken
 
 export class ApiError extends Error {

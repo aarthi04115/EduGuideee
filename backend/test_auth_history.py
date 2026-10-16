@@ -240,6 +240,43 @@ class AuthenticationHistoryTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(self.client.get("/auth/me").status_code, 200)
 
+        # Direct login without CSRF header (such as from Swagger UI or API client)
+        swagger_client = TestClient(main.app)
+        direct_login = swagger_client.post(
+            "/auth/login",
+            json={
+                "email": "student@example.edu",
+                "password": "a-valid-password-123",
+            },
+        )
+        self.assertEqual(direct_login.status_code, 200)
+        self.assertEqual(swagger_client.get("/auth/me").status_code, 200)
+
+        # Authenticated state-changing endpoints strictly enforce CSRF
+        no_csrf_mutation = swagger_client.post("/conversations", json={})
+        self.assertEqual(no_csrf_mutation.status_code, 403)
+        self.assertEqual(no_csrf_mutation.json()["detail"], "CSRF validation failed.")
+        swagger_client.close()
+
+    def test_cors_preflight_for_production_origin(self):
+        response = self.client.options(
+            "/auth/login",
+            headers={
+                "Origin": "https://eduguide-frontend.onrender.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-csrf-token",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers.get("access-control-allow-origin"),
+            "https://eduguide-frontend.onrender.com",
+        )
+        self.assertEqual(
+            response.headers.get("access-control-allow-credentials"),
+            "true",
+        )
+
     def test_chat_history_is_persistent_and_owned(self):
         self.assertEqual(self.register(self.client, "first@example.edu").status_code, 201)
         csrf = self.csrf(self.client)

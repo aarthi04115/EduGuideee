@@ -55,13 +55,15 @@ def _token_lifetime():
 
 
 def _cookie_settings():
-    secure = os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
     same_site = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()
-    if same_site not in {"lax", "strict"}:
+    if same_site not in {"lax", "strict", "none"}:
         raise HTTPException(
             status_code=503,
-            detail="COOKIE_SAMESITE must be 'lax' or 'strict'.",
+            detail="COOKIE_SAMESITE must be 'lax', 'strict', or 'none'.",
         )
+    secure = os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
+    if same_site == "none":
+        secure = True
     return secure, same_site
 
 

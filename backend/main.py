@@ -81,20 +81,25 @@ async def lifespan(_app):
     yield
 
 
+configured_origins = {
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "EDUGUIDE_CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,https://eduguide-frontend.onrender.com",
+    ).split(",")
+    if origin.strip()
+}
+configured_origins.add("https://eduguide-frontend.onrender.com")
+configured_origins.add("http://localhost:5173")
+configured_origins.add("http://127.0.0.1:5173")
+
 app = FastAPI(title="EduGuide API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        origin.strip()
-        for origin in os.getenv(
-            "EDUGUIDE_CORS_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173",
-        ).split(",")
-        if origin.strip()
-    ],
+    allow_origins=sorted(configured_origins),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-CSRF-Token"],
+    allow_headers=["*"],
 )
 app.include_router(auth_router)
 

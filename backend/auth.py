@@ -14,6 +14,7 @@ from models import AuthSession, User
 from schemas import UserCreate, UserLogin, user_response
 from security import (
     CSRF_COOKIE,
+    _cookie_settings,
     clear_session_cookies,
     csrf_protection,
     get_current_user,
@@ -38,13 +39,7 @@ def _commit_or_raise(db):
 @router.get("/csrf")
 def csrf_token(response: Response):
     token = make_csrf_token()
-    secure = os.getenv("COOKIE_SECURE", "false").lower() == "true"
-    same_site = os.getenv("COOKIE_SAMESITE", "lax").lower()
-    if same_site not in {"lax", "strict"}:
-        raise HTTPException(
-            status_code=503,
-            detail="COOKIE_SAMESITE must be 'lax' or 'strict'.",
-        )
+    secure, same_site = _cookie_settings()
     response.set_cookie(
         CSRF_COOKIE,
         token,
@@ -58,7 +53,7 @@ def csrf_token(response: Response):
     return {"csrf_token": token}
 
 
-@router.post("/register", status_code=201, dependencies=[Depends(csrf_protection)])
+@router.post("/register", status_code=201)
 def register(
     data: UserCreate,
     response: Response,
@@ -90,7 +85,7 @@ def register(
     return {"user": user_response(user)}
 
 
-@router.post("/login", dependencies=[Depends(csrf_protection)])
+@router.post("/login")
 def login(
     data: UserLogin,
     response: Response,
