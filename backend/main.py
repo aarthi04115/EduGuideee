@@ -648,7 +648,7 @@ async def upload_document(
         try:
             from document_processor import extract_pages_from_file
 
-            pages = extract_pages_from_file(stored_path)
+            pages = await asyncio.to_thread(extract_pages_from_file, stored_path)
         except (UnicodeDecodeError, OSError, ValueError) as error:
             raise HTTPException(
                 status_code=422,
@@ -663,7 +663,8 @@ async def upload_document(
                 detail="No readable text was found in this document.",
             )
 
-        indexed_material = add_material(
+        indexed_material = await asyncio.to_thread(
+            add_material,
             document_id,
             user.id,
             original_name,

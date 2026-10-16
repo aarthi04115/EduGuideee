@@ -234,7 +234,9 @@ function App() {
 
   function noteServiceFailure(error) {
     if (error.status === 503) setDatabaseStatus('offline')
-    if (error.status === 0) setBackendStatus('offline')
+    if (error.status === 0 && !error.message?.includes('timed out')) {
+      setBackendStatus('offline')
+    }
   }
 
   function requireSignIn(error) {

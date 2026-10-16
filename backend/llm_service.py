@@ -66,7 +66,7 @@ they support; otherwise answer from general academic knowledge.
 """
 
     client = get_llm_client()
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -80,6 +80,7 @@ they support; otherwise answer from general academic knowledge.
             }
         ],
         temperature=0.3,
+        timeout=45.0,
     )
 
     return response.choices[0].message.content

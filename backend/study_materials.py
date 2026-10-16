@@ -42,6 +42,7 @@ class StudyMaterial:
 
 
 MAX_CACHED_MATERIALS = 2
+MAX_DOCUMENT_CHUNKS = 400
 _materials: OrderedDict[str, StudyMaterial] = OrderedDict()
 _materials_lock = RLock()
 MAX_RETRIEVAL_DISTANCE = 1.3
@@ -69,6 +70,15 @@ def add_material(document_id, owner_id, filename, file_path, pages, size):
     chunks, page_numbers = _chunks_with_pages(pages)
     if not chunks:
         raise ValueError("The document does not contain readable text.")
+
+    if len(chunks) > MAX_DOCUMENT_CHUNKS:
+        logger.info(
+            "Document has %d chunks; capping to %d for index stability.",
+            len(chunks),
+            MAX_DOCUMENT_CHUNKS,
+        )
+        chunks = chunks[:MAX_DOCUMENT_CHUNKS]
+        page_numbers = page_numbers[:MAX_DOCUMENT_CHUNKS]
 
     index = create_index_for_chunks(chunks, create_embeddings)
     material = StudyMaterial(
