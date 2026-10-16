@@ -1,10 +1,7 @@
-from sentence_transformers import SentenceTransformer
-
-model = SentenceTransformer("all-MiniLM-L6-v2")
+from embeddings import create_embeddings
 
 text = "What is DBMS?"
-
-embedding = model.encode(text)
+embedding = create_embeddings([text])[0]
 
 print("Number of values:", len(embedding))
 print("First 10 values:", embedding[:10])

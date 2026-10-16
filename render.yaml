@@ -4,7 +4,7 @@ services:
     name: eduguide-backend
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python -c "from huggingface_hub import hf_hub_download; from tokenizers import Tokenizer; hf_hub_download('sentence-transformers/all-MiniLM-L6-v2', 'onnx/model_O4.onnx'); Tokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')"
     preDeployCommand: alembic upgrade head
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     plan: free
@@ -16,7 +16,7 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: ACCESS_TOKEN_EXPIRE_MINUTES

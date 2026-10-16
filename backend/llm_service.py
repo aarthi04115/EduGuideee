@@ -66,21 +66,41 @@ they support; otherwise answer from general academic knowledge.
 """
 
     client = get_llm_client()
-    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": user_prompt
-            }
-        ],
-        temperature=0.3,
-        timeout=45.0,
-    )
+    configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    candidate_models = [
+        configured_model,
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile",
+    ]
+    seen = set()
+    models_to_try = [m for m in candidate_models if not (m in seen or seen.add(m))]
 
-    return response.choices[0].message.content
+    last_error = None
+    for model in models_to_try:
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt
+                    }
+                ],
+                temperature=0.3,
+                timeout=45.0,
+            )
+            return response.choices[0].message.content
+        except Exception as exc:
+            last_error = exc
+            error_str = str(exc).lower()
+            if "model_not_found" in error_str or "does not exist" in error_str:
+                continue
+            raise
+
+    if last_error:
+        raise last_error

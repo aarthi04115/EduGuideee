@@ -1,7 +1,9 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 pymupdf>=1.24
-sentence-transformers>=3.0
+onnxruntime>=1.17
+tokenizers>=0.19
+huggingface-hub>=0.20
 faiss-cpu>=1.8
 openai>=1.40
 python-dotenv>=1.0

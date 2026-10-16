@@ -451,7 +451,7 @@ def chat(
         if not answer:
             raise RuntimeError("The answer provider returned an empty response.")
     except Exception as error:
-        logger.error("Answer generation failed (%s).", type(error).__name__)
+        logger.exception("Answer generation failed (%s): %s", type(error).__name__, error)
         raise HTTPException(
             status_code=502,
             detail={

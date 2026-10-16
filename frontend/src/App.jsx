@@ -344,6 +344,30 @@ function App() {
   }, [bootstrapRetry])
 
   useEffect(() => {
+    if (backendStatus !== 'offline') return undefined
+    let cancelled = false
+    const pollTimer = setInterval(async () => {
+      try {
+        await checkBackendHealth()
+        if (cancelled) return
+        setBackendStatus('online')
+        try {
+          await checkDatabaseHealth()
+          if (!cancelled) setDatabaseStatus('online')
+        } catch {
+          // database check ignored
+        }
+      } catch {
+        // still offline, continue polling
+      }
+    }, 4000)
+    return () => {
+      cancelled = true
+      clearInterval(pollTimer)
+    }
+  }, [backendStatus])
+
+  useEffect(() => {
     if (authState !== 'authenticated') return undefined
     let cancelled = false
     async function loadAccountData() {
@@ -1688,7 +1712,31 @@ function App() {
             {backendStatus === 'offline' && hasMessages && (
               <div className="composer-offline" role="status">
                 <AlertCircle size={15} />
-                Backend unavailable · Your message cannot be sent yet.
+                <span>Backend unavailable · Your message cannot be sent yet.</span>
+                <button
+                  type="button"
+                  style={{
+                    marginLeft: '8px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid currentColor',
+                    background: 'transparent',
+                    color: 'inherit',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                  }}
+                  onClick={async () => {
+                    try {
+                      await checkBackendHealth()
+                      setBackendStatus('online')
+                      setDatabaseStatus('online')
+                    } catch {
+                      // still offline
+                    }
+                  }}
+                >
+                  Retry
+                </button>
               </div>
             )}
             <div className="composer">
