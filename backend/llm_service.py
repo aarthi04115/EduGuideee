@@ -50,13 +50,14 @@ Start with the answer. Use the retrieved excerpts as evidence only for claims
 they support; otherwise answer from general academic knowledge.
 """
 
-    api_key = os.getenv("GROQ_API_KEY")
+    raw_key = os.getenv("GROQ_API_KEY", "")
+    api_key = "".join(raw_key.split()).strip("'\"")
     if not api_key:
         raise RuntimeError(
             "GROQ_API_KEY is not set. Add your Groq API key to the project environment variables."
         )
 
-    configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    configured_model = "".join(os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").split()).strip("'\"")
     candidate_models = [
         configured_model,
         "openai/gpt-oss-120b",
