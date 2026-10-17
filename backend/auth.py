@@ -71,7 +71,7 @@ def register(
     db.add(user)
     try:
         db.flush()
-        issue_session(response, db, user)
+        csrf_token = issue_session(response, db, user)
         _commit_or_raise(db)
     except IntegrityError as error:
         db.rollback()
@@ -82,7 +82,7 @@ def register(
     except SQLAlchemyError:
         db.rollback()
         raise
-    return {"user": user_response(user)}
+    return {"user": user_response(user), "csrf_token": csrf_token}
 
 
 @router.post("/login")
@@ -97,12 +97,12 @@ def login(
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
     try:
-        issue_session(response, db, user)
+        csrf_token = issue_session(response, db, user)
         _commit_or_raise(db)
     except SQLAlchemyError:
         db.rollback()
         raise
-    return {"user": user_response(user)}
+    return {"user": user_response(user), "csrf_token": csrf_token}
 
 
 @router.get("/me")

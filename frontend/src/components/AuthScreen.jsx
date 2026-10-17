@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { AlertCircle, ArrowRight, BookOpen, LoaderCircle, ShieldCheck } from 'lucide-react'
 import { ApiError, loginStudent, registerStudent } from '../services/api.js'
 import './AuthScreen.css'
@@ -6,7 +6,6 @@ import './AuthScreen.css'
 export default function AuthScreen({
   onAuthenticated,
   backendStatus,
-  databaseStatus,
   initialError,
   onRequestError,
   onRetry,
@@ -16,18 +15,22 @@ export default function AuthScreen({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [bootstrapError, setBootstrapError] = useState(initialError)
+  const [prevInitialError, setPrevInitialError] = useState(initialError)
+  const [clearedInitialError, setClearedInitialError] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    setBootstrapError(initialError)
-  }, [initialError])
+  if (initialError !== prevInitialError) {
+    setPrevInitialError(initialError)
+    setClearedInitialError(false)
+  }
+
+  const activeError = error || (!clearedInitialError ? initialError : '')
 
   async function submit(event) {
     event.preventDefault()
     if (submitting) return
     setError('')
-    setBootstrapError('')
+    setClearedInitialError(true)
     setSubmitting(true)
     try {
       const user =
@@ -50,7 +53,7 @@ export default function AuthScreen({
   function changeMode(nextMode) {
     setMode(nextMode)
     setError('')
-    setBootstrapError('')
+    setClearedInitialError(true)
     setPassword('')
   }
 
@@ -96,53 +99,18 @@ export default function AuthScreen({
               : 'Your academic chat history will be saved to your account.'}
           </p>
 
-          {backendStatus === 'offline' && !error && !bootstrapError && (
+          {activeError && (
             <div className="auth-alert" role="alert">
               <AlertCircle size={17} />
               <span>
-                Backend unreachable. Check that the API server is running and
-                try again.
-              </span>
-              {onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  style={{
-                    marginLeft: '8px',
-                    textDecoration: 'underline',
-                    background: 'none',
-                    border: 'none',
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                  }}
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          )}
-          {databaseStatus === 'offline' && backendStatus === 'online' && (
-            <div className="auth-alert" role="alert">
-              <AlertCircle size={17} />
-              <span>
-                Backend reachable, but the database is unavailable or its
-                migration is pending. Sign-in and history need the database.
-              </span>
-            </div>
-          )}
-          {(error || bootstrapError) && (
-            <div className="auth-alert" role="alert">
-              <AlertCircle size={17} />
-              <span>
-                {error || bootstrapError}
+                {activeError}
               </span>
               {onRetry && (
                 <button
                   type="button"
                   onClick={() => {
                     setError('')
-                    setBootstrapError('')
+                    setClearedInitialError(true)
                     onRetry?.()
                   }}
                   style={{
@@ -158,22 +126,6 @@ export default function AuthScreen({
                   Retry
                 </button>
               )}
-            </div>
-          )}
-          {backendStatus === 'checking' && !error && !bootstrapError && (
-            <div className="auth-status">
-              <LoaderCircle size={14} className="spin" />
-              Connecting to EduGuide...
-            </div>
-          )}
-          {backendStatus === 'online' &&
-            databaseStatus === 'online' &&
-            mode === 'login' &&
-            !error &&
-            !bootstrapError && (
-            <div className="auth-status">
-              <span />
-              Backend reachable · Database ready
             </div>
           )}
 

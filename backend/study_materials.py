@@ -122,18 +122,46 @@ def load_material(document: Document, owner_id: str):
         if material is not None:
             return material
 
+        pages = None
+        # 1. Try reading from storage_path on disk
+        if document.storage_path and Path(document.storage_path).is_file():
+            try:
+                pages = extract_pages_from_file(document.storage_path)
+            except Exception as exc:
+                logger.warning("Could not extract pages from disk for %s: %s", document.id, exc)
+
+        # 2. If disk file is unavailable (e.g. Render container restart), restore from DB pages_json
+        if not pages and getattr(document, "pages_json", None):
+            try:
+                pages = [
+                    (int(item.get("page_number", idx + 1)), str(item.get("text", "")))
+                    for idx, item in enumerate(document.pages_json)
+                    if isinstance(item, dict)
+                ]
+            except Exception as exc:
+                logger.warning("Could not parse pages_json for %s: %s", document.id, exc)
+
+        # 3. Fallback to document.content_text
+        if not pages and getattr(document, "content_text", None):
+            pages = [(1, document.content_text)]
+
+        if not pages or not any(text.strip() for _, text in pages):
+            logger.warning("Could not load or restore readable text for study material %s.", document.id)
+            return None
+
         try:
-            pages = extract_pages_from_file(document.storage_path)
-            if not any(text.strip() for _, text in pages):
-                raise ValueError("No readable text was found.")
             chunks, page_numbers = _chunks_with_pages(pages)
             if not chunks:
-                raise ValueError("No text chunks were produced.")
+                return None
+            if len(chunks) > MAX_DOCUMENT_CHUNKS:
+                chunks = chunks[:MAX_DOCUMENT_CHUNKS]
+                page_numbers = page_numbers[:MAX_DOCUMENT_CHUNKS]
+
             material = StudyMaterial(
                 document_id=document.id,
                 owner_id=document.user_id,
                 filename=document.filename,
-                file_path=document.storage_path,
+                file_path=document.storage_path or "",
                 size=document.file_size,
                 chunks=chunks,
                 page_numbers=page_numbers,
@@ -141,8 +169,6 @@ def load_material(document: Document, owner_id: str):
             )
             _remember_material(material)
             return material
-        except (OSError, ValueError):
-            logger.warning("Could not load indexed study material %s.", document.id)
         except Exception:
             logger.exception("Failed to load indexed study material %s.", document.id)
     return None

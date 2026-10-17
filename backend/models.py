@@ -158,6 +158,8 @@ class Document(Base):
         String(16), nullable=False, default="indexing"
     )
     file_size = Column(Integer, nullable=False)
+    content_text = Column(Text, nullable=True)
+    pages_json = Column(JSON, nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

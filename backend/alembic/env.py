@@ -48,12 +48,14 @@ def run_migrations_online():
         return
 
     configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = get_url()
+    url = get_url()
+    configuration["sqlalchemy.url"] = url
+    connect_args = {"connect_timeout": 10} if "postgres" in url.lower() else {}
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        connect_args={"connect_timeout": 10},
+        connect_args=connect_args,
     )
     with connectable.connect() as connection:
         run(connection)

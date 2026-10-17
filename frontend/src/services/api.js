@@ -1,4 +1,7 @@
-let rawBase = import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000'
+let rawBase =
+  import.meta.env?.VITE_API_BASE_URL ||
+  import.meta.env?.VITE_API_URL ||
+  'http://localhost:8000'
 if (rawBase && !rawBase.startsWith('http://') && !rawBase.startsWith('https://')) {
   rawBase = `https://${rawBase}`
 }
@@ -100,7 +103,11 @@ export async function registerStudent({ name, email, password }) {
     '/auth/register',
     jsonOptions('POST', { name, email, password }),
   )
-  await getCsrfToken()
+  if (result.csrf_token) {
+    csrfToken = result.csrf_token
+  } else {
+    await getCsrfToken()
+  }
   return result.user
 }
 
@@ -110,7 +117,11 @@ export async function loginStudent({ email, password }) {
     '/auth/login',
     jsonOptions('POST', { email, password }),
   )
-  await getCsrfToken()
+  if (result.csrf_token) {
+    csrfToken = result.csrf_token
+  } else {
+    await getCsrfToken()
+  }
   return result.user
 }
 

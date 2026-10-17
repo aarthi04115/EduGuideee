@@ -66,6 +66,18 @@ def _check_db_startup():
                 ", ".join(sorted(missing_tables)),
             )
             Base.metadata.create_all(bind=engine)
+
+        # Ensure documents table has content_text and pages_json columns for persistent text retention
+        try:
+            with engine.begin() as conn:
+                doc_columns = {col["name"] for col in inspect(conn).get_columns("documents")}
+                if "content_text" not in doc_columns:
+                    conn.exec_driver_sql("ALTER TABLE documents ADD COLUMN content_text TEXT")
+                if "pages_json" not in doc_columns:
+                    conn.exec_driver_sql("ALTER TABLE documents ADD COLUMN pages_json JSON")
+        except Exception as exc:
+            logger.debug("Database column inspection/migration deferred: %s", exc)
+
         with SessionLocal() as db:
             document_count = initialize_materials(db)
             logger.info(
@@ -99,24 +111,49 @@ configured_origins = {
 configured_origins.add("https://eduguide-frontend.onrender.com")
 configured_origins.add("http://localhost:5173")
 configured_origins.add("http://127.0.0.1:5173")
+configured_origins.add("http://localhost:3000")
+configured_origins.add("http://127.0.0.1:3000")
 
 app = FastAPI(title="EduGuide API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(configured_origins),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS", "PUT"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 app.include_router(auth_router)
 
 
+def _cors_response(request: Request, status_code: int, content: dict) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content=content)
+    origin = request.headers.get("origin")
+    if origin and (origin in configured_origins or "*" in configured_origins):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS, PUT"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, error: Exception):
+    logger.exception("Unhandled server exception: %s", error)
+    return _cors_response(
+        request,
+        status_code=500,
+        content={"detail": "An internal server error occurred. Please try again."},
+    )
+
+
 @app.exception_handler(OperationalError)
 async def database_connection_error_handler(
-    _request: Request, error: OperationalError
+    request: Request, error: OperationalError
 ):
     logger.exception("Database connection or operation failed.")
-    return JSONResponse(
+    return _cors_response(
+        request,
         status_code=503,
         content={
             "detail": "The database is temporarily unavailable. Please try again."
@@ -126,7 +163,7 @@ async def database_connection_error_handler(
 
 @app.exception_handler(ProgrammingError)
 async def database_programming_error_handler(
-    _request: Request, error: ProgrammingError
+    request: Request, error: ProgrammingError
 ):
     logger.exception("A database query could not be executed.")
     error_code = getattr(error.orig, "sqlstate", None) or getattr(
@@ -134,13 +171,15 @@ async def database_programming_error_handler(
     )
     message = str(error.orig).lower()
     if error_code == "42P01" or "no such table" in message or "does not exist" in message:
-        return JSONResponse(
+        return _cors_response(
+            request,
             status_code=503,
             content={
                 "detail": "The database schema is not initialized. Apply the pending database migrations."
             },
         )
-    return JSONResponse(
+    return _cors_response(
+        request,
         status_code=500,
         content={"detail": "The database could not complete this request."},
     )
@@ -148,27 +187,30 @@ async def database_programming_error_handler(
 
 @app.exception_handler(IntegrityError)
 async def database_integrity_error_handler(
-    _request: Request, error: IntegrityError
+    request: Request, error: IntegrityError
 ):
     logger.exception("A database integrity constraint rejected an operation.")
-    return JSONResponse(
+    return _cors_response(
+        request,
         status_code=409,
         content={"detail": "The requested change conflicts with existing data."},
     )
 
 
 @app.exception_handler(SQLAlchemyError)
-async def database_error_handler(_request: Request, error: SQLAlchemyError):
+async def database_error_handler(request: Request, error: SQLAlchemyError):
     logger.exception("A database operation failed.")
-    return JSONResponse(
+    return _cors_response(
+        request,
         status_code=500,
         content={"detail": "The database could not complete this request."},
     )
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(_request: Request, error: RequestValidationError):
-    return JSONResponse(
+async def validation_error_handler(request: Request, error: RequestValidationError):
+    return _cors_response(
+        request,
         status_code=422,
         content={
             "detail": [
@@ -221,9 +263,26 @@ def home():
     return {"message": "EduGuide backend is running"}
 
 
+@app.get("/health/live")
+@app.get("/health/liveness")
+def liveness():
+    return {
+        "status": "alive",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.get("/health/ready")
+@app.get("/health/readiness")
 def readiness(db: Session = Depends(get_db)):
-    db.execute(select(1))
+    try:
+        db.execute(select(1))
+    except Exception as exc:
+        logger.warning("Database probe failed during readiness check: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="The database is temporarily unavailable. Please try again.",
+        )
     existing_tables = set(inspect(db.get_bind()).get_table_names())
     missing_tables = set(Base.metadata.tables) - existing_tables
     if missing_tables:
@@ -367,7 +426,7 @@ def chat(
         sequence = _message_sequence(db, conversation.id)
 
     selected_documents = []
-    if requested_document_ids is None:
+    if not requested_document_ids:
         selected_documents = list(
             db.scalars(
                 select(Document)
@@ -379,7 +438,7 @@ def chat(
                 )
             )
         )
-    elif requested_document_ids:
+    else:
         selected_documents = list(
             db.scalars(
                 select(Document).where(
@@ -454,17 +513,28 @@ def chat(
             answer, sources = answer_result, []
         if not answer:
             raise RuntimeError("The answer provider returned an empty response.")
+    except HTTPException:
+        raise
     except Exception as error:
         logger.exception("Answer generation failed (%s): %s", type(error).__name__, error)
+        status_code = getattr(error, "status_code", 502)
         error_str = str(error)
         if "GROQ_API_KEY" in error_str or "api_key" in error_str.lower():
             user_msg = "EduGuide could not generate an answer: GROQ_API_KEY is not configured on Render. Please add GROQ_API_KEY to your Render environment variables."
+        elif "rate limit" in error_str.lower() or status_code == 429:
+            status_code = 429
+            user_msg = "EduGuide could not generate an answer: AI provider rate limit was reached. Please wait a moment and try again."
+        elif "timed out" in error_str.lower() or status_code == 504:
+            status_code = 504
+            user_msg = "EduGuide could not generate an answer: The AI provider timed out. Please try again."
         elif "model_not_found" in error_str or "does not exist" in error_str:
             user_msg = f"EduGuide could not generate an answer: Model error ({error_str[:80]})."
+        elif "connection" in error_str.lower():
+            user_msg = "EduGuide could not generate an answer: Connection to the AI provider failed. Check provider network status."
         else:
             user_msg = f"EduGuide could not generate an answer: {error_str[:120]}"
         raise HTTPException(
-            status_code=502,
+            status_code=status_code,
             detail={
                 "message": user_msg,
                 "conversation_id": conversation.id,
@@ -690,6 +760,8 @@ async def upload_document(
             storage_path=str(stored_path),
             status="indexed",
             file_size=size,
+            content_text="\n\n".join(text for _, text in pages),
+            pages_json=[{"page_number": p, "text": t} for p, t in pages],
         )
         conversation.documents.append(document)
         conversation.updated_at = datetime.now(timezone.utc)

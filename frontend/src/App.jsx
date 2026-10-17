@@ -225,7 +225,6 @@ function App() {
   const messageListRef = useRef(null)
   const inputRef = useRef(null)
   const fileInputRef = useRef(null)
-  const sessionBootstrapRef = useRef(null)
   const activeIdRef = useRef(activeId)
 
   useEffect(() => {
@@ -344,28 +343,45 @@ function App() {
   }, [bootstrapRetry])
 
   useEffect(() => {
-    if (backendStatus !== 'offline') return undefined
     let cancelled = false
-    const pollTimer = setInterval(async () => {
+
+    async function checkStatus() {
       try {
         await checkBackendHealth()
         if (cancelled) return
         setBackendStatus('online')
-        try {
-          await checkDatabaseHealth()
-          if (!cancelled) setDatabaseStatus('online')
-        } catch {
-          // database check ignored
+      } catch (err) {
+        if (cancelled) return
+        if (err.status === 0 || err.status >= 500) {
+          setBackendStatus('offline')
+        }
+      }
+
+      try {
+        const readyData = await checkDatabaseHealth()
+        if (cancelled) return
+        if (readyData && readyData.database === 'available') {
+          setDatabaseStatus('online')
+        } else {
+          setDatabaseStatus('offline')
         }
       } catch {
-        // still offline, continue polling
+        if (cancelled) return
+        setDatabaseStatus('offline')
       }
-    }, 4000)
+    }
+
+    const intervalMs =
+      backendStatus === 'offline' || databaseStatus === 'offline' ? 5000 : 30000
+    const pollTimer = setInterval(() => {
+      void checkStatus()
+    }, intervalMs)
+
     return () => {
       cancelled = true
       clearInterval(pollTimer)
     }
-  }, [backendStatus])
+  }, [backendStatus, databaseStatus])
 
   useEffect(() => {
     if (authState !== 'authenticated') return undefined
@@ -415,8 +431,19 @@ function App() {
   }, [authState, historyRetry])
 
   useEffect(() => {
-    setSelectedDocumentIds([])
-  }, [activeId])
+    if (!activeId) {
+      setSelectedDocumentIds([])
+      return
+    }
+    const current = conversations.find((c) => c.id === activeId)
+    if (current?.loaded && current.attachments) {
+      setSelectedDocumentIds(
+        current.attachments
+          .filter((doc) => doc.status === 'indexed' || doc.status === 'ready')
+          .map((doc) => doc.id),
+      )
+    }
+  }, [activeId, conversations])
 
   useEffect(() => {
     if (hasMessages && messageListRef.current) {
@@ -529,18 +556,19 @@ function App() {
             : conversation.attachments,
         loaded: true,
       }))
-      if (
-        documentResult.status === 'fulfilled' &&
-        activeIdRef.current === conversationId
-      ) {
-        const restoredDocuments = documentResult.value.map(mapServerDocument)
-        setSelectedDocumentIds(
-          restoredDocuments
-            .filter((document) => document.status === 'indexed')
-            .map((document) => document.id),
+      if (documentResult.status === 'fulfilled') {
+        if (activeIdRef.current === conversationId) {
+          const restoredDocuments = documentResult.value.map(mapServerDocument)
+          setSelectedDocumentIds(
+            restoredDocuments
+              .filter((document) => document.status === 'indexed' || document.status === 'ready')
+              .map((document) => document.id),
+          )
+        }
+      } else if (documentResult.status === 'rejected') {
+        setDocumentsError(
+          documentResult.reason?.message || 'Failed to load conversation documents.',
         )
-      } else {
-        setDocumentsError(documentResult.reason.message)
       }
     } catch (error) {
       if (error.status === 401) {
@@ -696,17 +724,28 @@ function App() {
         requireSignIn(error)
         return
       }
-      noteServiceFailure(error)
-      if (error.message.startsWith('Unable to connect')) {
+      if (error.status === 0) {
         setBackendStatus('offline')
+      } else if (error.status === 503) {
+        setDatabaseStatus('offline')
       }
+
+      let displayMessage = error.message
+      if (error.status === 403) {
+        displayMessage = 'Action forbidden or session expired. Please refresh the page and try again.'
+      } else if (error.status === 429) {
+        displayMessage = error.message || 'AI provider rate limit reached. Please wait a moment before trying again.'
+      } else if (error.status === 504) {
+        displayMessage = 'The AI provider timed out generating a response. Please try again.'
+      }
+
       updateConversation(conversationId, (conversation) => ({
         ...conversation,
         messages: conversation.messages.map((message) =>
           message.id === messageId
             ? {
                 ...message,
-                content: error.message,
+                content: displayMessage,
                 pending: false,
                 isError: true,
                 question,
@@ -1063,7 +1102,6 @@ function App() {
       <AuthScreen
         onAuthenticated={handleAuthenticated}
         backendStatus={backendStatus}
-        databaseStatus={databaseStatus}
         initialError={authError}
         onRetry={() => setBootstrapRetry((v) => v + 1)}
         onRequestError={(error) => {

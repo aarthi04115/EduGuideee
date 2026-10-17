@@ -55,13 +55,24 @@ def _token_lifetime():
 
 
 def _cookie_settings():
-    same_site = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()
+    is_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
+    raw_samesite = os.getenv("COOKIE_SAMESITE", "").strip().lower()
+    if not raw_samesite:
+        same_site = "none" if is_render else "lax"
+    else:
+        same_site = raw_samesite
+
     if same_site not in {"lax", "strict", "none"}:
         raise HTTPException(
             status_code=503,
             detail="COOKIE_SAMESITE must be 'lax', 'strict', or 'none'.",
         )
-    secure = os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
+    raw_secure = os.getenv("COOKIE_SECURE", "").strip().lower()
+    if raw_secure:
+        secure = raw_secure == "true"
+    else:
+        secure = True if (is_render or same_site == "none") else False
+
     if same_site == "none":
         secure = True
     return secure, same_site
@@ -146,6 +157,7 @@ def issue_session(response: Response, db: Session, user: User):
         samesite=same_site,
         path="/",
     )
+    return csrf_token
 
 
 def clear_session_cookies(response: Response):
