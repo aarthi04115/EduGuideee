@@ -426,6 +426,319 @@ class ProductionVerificationTests(unittest.TestCase):
 
         client.close()
 
+    def test_normal_question_without_selected_documents_has_no_bda_contamination(self):
+        client = TestClient(main.app)
+        csrf = self.csrf(client)
+        self.mutate(
+            client,
+            "POST",
+            "/auth/register",
+            csrf,
+            json={
+                "name": "General Question User",
+                "email": "general_q@sairam.edu",
+                "password": "Password123!",
+            },
+        )
+
+        captured_messages = []
+
+        def mock_llm_create(*args, **kwargs):
+            messages = kwargs.get("messages", [])
+            captured_messages.extend(messages)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Supervised learning is an algorithm trained on labeled data."
+                        )
+                    )
+                ]
+            )
+
+        with patch.object(llm_service.client.chat.completions, "create", side_effect=mock_llm_create):
+            csrf = self.csrf(client)
+            chat_resp = self.mutate(
+                client,
+                "POST",
+                "/chat",
+                csrf,
+                json={"question": "What is supervised learning?"},
+            )
+            self.assertEqual(chat_resp.status_code, 200)
+            data = chat_resp.json()
+            self.assertIn("Supervised learning", data["answer"])
+            # Ensure no BDA chunks or study materials were injected into the prompt
+            prompt_content = " ".join([m.get("content", "") for m in captured_messages])
+            self.assertNotIn("bda 2 marks", prompt_content.lower())
+            self.assertIn("no study materials were selected", prompt_content.lower())
+
+        client.close()
+
+    def test_two_different_questions_produce_different_answers(self):
+        client = TestClient(main.app)
+        csrf = self.csrf(client)
+        self.mutate(
+            client,
+            "POST",
+            "/auth/register",
+            csrf,
+            json={
+                "name": "Two Question User",
+                "email": "two_q@sairam.edu",
+                "password": "Password123!",
+            },
+        )
+
+        def mock_llm_create(*args, **kwargs):
+            messages = kwargs.get("messages", [])
+            last_prompt = messages[-1].get("content", "")
+            if "calculus" in last_prompt.lower():
+                answer = "Calculus is the mathematical study of continuous change."
+            else:
+                answer = "Photosynthesis is the process by which green plants synthesize nutrients."
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=answer))]
+            )
+
+        with patch.object(llm_service.client.chat.completions, "create", side_effect=mock_llm_create):
+            csrf = self.csrf(client)
+            resp1 = self.mutate(
+                client,
+                "POST",
+                "/chat",
+                csrf,
+                json={"question": "What is calculus?"},
+            )
+            self.assertEqual(resp1.status_code, 200)
+
+            csrf = self.csrf(client)
+            resp2 = self.mutate(
+                client,
+                "POST",
+                "/chat",
+                csrf,
+                json={"question": "What is photosynthesis?"},
+            )
+            self.assertEqual(resp2.status_code, 200)
+
+            self.assertNotEqual(resp1.json()["answer"], resp2.json()["answer"])
+            self.assertIn("Calculus", resp1.json()["answer"])
+            self.assertIn("Photosynthesis", resp2.json()["answer"])
+
+        client.close()
+
+    def test_question_not_present_in_selected_pdf_signals_limitation_in_prompt(self):
+        client = TestClient(main.app)
+        csrf = self.csrf(client)
+        self.mutate(
+            client,
+            "POST",
+            "/auth/register",
+            csrf,
+            json={
+                "name": "Missing Fact User",
+                "email": "missing_fact@sairam.edu",
+                "password": "Password123!",
+            },
+        )
+
+        # Upload a document about Database Systems
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_text((50, 72), "Relational databases use SQL for querying structured tables.")
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        csrf = self.csrf(client)
+        upload_resp = self.mutate(
+            client,
+            "POST",
+            "/documents/upload",
+            csrf,
+            files={"file": ("sql_guide.pdf", pdf_bytes, "application/pdf")},
+        )
+        doc_id = upload_resp.json()["id"]
+
+        captured_messages = []
+
+        def mock_llm_create(*args, **kwargs):
+            messages = kwargs.get("messages", [])
+            captured_messages.extend(messages)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="The selected study material does not contain information about photosynthesis.\n\n### General Academic Explanation\nPhotosynthesis converts light into energy."
+                        )
+                    )
+                ]
+            )
+
+        with patch.object(llm_service.client.chat.completions, "create", side_effect=mock_llm_create):
+            csrf = self.csrf(client)
+            chat_resp = self.mutate(
+                client,
+                "POST",
+                "/chat",
+                csrf,
+                json={
+                    "question": "What is photosynthesis and the Calvin cycle?",
+                    "document_ids": [doc_id],
+                },
+            )
+            self.assertEqual(chat_resp.status_code, 200)
+            data = chat_resp.json()
+            self.assertIn("does not contain information", data["answer"])
+            prompt_content = " ".join([m.get("content", "") for m in captured_messages])
+            self.assertIn("no matching or relevant excerpts were found", prompt_content)
+
+        client.close()
+
+    def test_multiple_selected_pdfs_retrieve_respective_content(self):
+        client = TestClient(main.app)
+        csrf = self.csrf(client)
+        self.mutate(
+            client,
+            "POST",
+            "/auth/register",
+            csrf,
+            json={
+                "name": "Multi PDF User",
+                "email": "multi_pdf@sairam.edu",
+                "password": "Password123!",
+            },
+        )
+
+        # Upload PDF 1: Physics
+        doc1 = pymupdf.open()
+        page1 = doc1.new_page()
+        page1.insert_text((50, 72), "Newton's first law states that an object remains at rest unless acted upon.")
+        pdf1_bytes = doc1.tobytes()
+        doc1.close()
+
+        csrf = self.csrf(client)
+        upload1 = self.mutate(
+            client,
+            "POST",
+            "/documents/upload",
+            csrf,
+            files={"file": ("physics.pdf", pdf1_bytes, "application/pdf")},
+        )
+        doc1_id = upload1.json()["id"]
+
+        # Upload PDF 2: Biology
+        doc2 = pymupdf.open()
+        page2 = doc2.new_page()
+        page2.insert_text((50, 72), "Mitochondria generates ATP through oxidative phosphorylation.")
+        pdf2_bytes = doc2.tobytes()
+        doc2.close()
+
+        csrf = self.csrf(client)
+        upload2 = self.mutate(
+            client,
+            "POST",
+            "/documents/upload",
+            csrf,
+            files={"file": ("biology.pdf", pdf2_bytes, "application/pdf")},
+        )
+        doc2_id = upload2.json()["id"]
+
+        with patch.object(
+            llm_service.client.chat.completions,
+            "create",
+            return_value=SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Grounded response"))]
+            ),
+        ):
+            # Query about physics with both attached
+            csrf = self.csrf(client)
+            resp_physics = self.mutate(
+                client,
+                "POST",
+                "/chat",
+                csrf,
+                json={
+                    "question": "What does Newton's first law state?",
+                    "document_ids": [doc1_id, doc2_id],
+                },
+            )
+            self.assertEqual(resp_physics.status_code, 200)
+            sources = resp_physics.json()["sources"]
+            source_ids = [s["id"] for s in sources]
+            self.assertIn(doc1_id, source_ids)
+
+        client.close()
+
+    def test_follow_up_question_receives_prior_conversation_history(self):
+        client = TestClient(main.app)
+        csrf = self.csrf(client)
+        self.mutate(
+            client,
+            "POST",
+            "/auth/register",
+            csrf,
+            json={
+                "name": "Followup User",
+                "email": "followup@sairam.edu",
+                "password": "Password123!",
+            },
+        )
+
+        captured_calls = []
+
+        def mock_llm_create(*args, **kwargs):
+            messages = kwargs.get("messages", [])
+            captured_calls.append(list(messages))
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Machine learning is algorithms finding patterns."
+                        )
+                    )
+                ]
+            )
+
+        with patch.object(llm_service.client.chat.completions, "create", side_effect=mock_llm_create):
+            # First question
+            csrf = self.csrf(client)
+            first_resp = self.mutate(
+                client,
+                "POST",
+                "/chat",
+                csrf,
+                json={"question": "What is machine learning?"},
+            )
+            self.assertEqual(first_resp.status_code, 200)
+            conv_id = first_resp.json()["conversation_id"]
+
+            # Second question (follow-up)
+            csrf = self.csrf(client)
+            second_resp = self.mutate(
+                client,
+                "POST",
+                "/chat",
+                csrf,
+                json={
+                    "conversation_id": conv_id,
+                    "question": "Can you give a math formula for it?",
+                },
+            )
+            self.assertEqual(second_resp.status_code, 200)
+
+            # Check that the second call received the prior user and assistant messages
+            self.assertGreaterEqual(len(captured_calls), 2)
+            second_call_messages = captured_calls[1]
+            roles = [m.get("role") for m in second_call_messages]
+            self.assertIn("user", roles)
+            self.assertIn("assistant", roles)
+            history_text = " ".join([m.get("content", "") for m in second_call_messages])
+            self.assertIn("What is machine learning?", history_text)
+
+        client.close()
+
 
 if __name__ == "__main__":
     unittest.main()
+

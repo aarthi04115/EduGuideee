@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { createLowlight } from 'lowlight'
 import bash from 'highlight.js/lib/languages/bash'
 import c from 'highlight.js/lib/languages/c'
@@ -58,6 +61,7 @@ import {
   uploadStudyMaterial,
 } from './services/api.js'
 import AuthScreen from './components/AuthScreen.jsx'
+import { formatMathInMarkdown } from './utils/math.js'
 import './App.css'
 import 'highlight.js/styles/github.css'
 
@@ -219,6 +223,7 @@ function App() {
   const [busyMessageId, setBusyMessageId] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [isNearToggle, setIsNearToggle] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [copyMessageId, setCopyMessageId] = useState('')
   const [copyErrorId, setCopyErrorId] = useState('')
@@ -230,6 +235,16 @@ function App() {
   useEffect(() => {
     activeIdRef.current = activeId
   }, [activeId])
+
+  useEffect(() => {
+    function handleMouseMove(event) {
+      // Toggle button is located in top-left area; reveal within 130px from left and 85px from top
+      const near = event.clientX <= 130 && event.clientY <= 85
+      setIsNearToggle(near)
+    }
+    window.addEventListener('mousemove', handleMouseMove, { passive: true })
+    return () => window.removeEventListener('mousemove', handleMouseMove)
+  }, [])
 
   function noteServiceFailure(error) {
     if (error.status === 503) setDatabaseStatus('offline')
@@ -530,6 +545,13 @@ function App() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         void startNewConversation()
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.key.toLowerCase() === 'b' || (event.shiftKey && event.key.toLowerCase() === 's'))
+      ) {
+        event.preventDefault()
+        setSidebarCollapsed((collapsed) => !collapsed)
       }
     }
     window.addEventListener('keydown', handleShortcut)
@@ -1075,19 +1097,6 @@ function App() {
       })
   }
 
-  const connectedLabel =
-    backendStatus === 'online'
-      ? 'Backend connected'
-      : backendStatus === 'checking'
-        ? 'Connecting'
-        : 'Backend unavailable'
-  const databaseLabel =
-    databaseStatus === 'online'
-      ? 'Database ready'
-      : databaseStatus === 'checking'
-        ? 'Database checking'
-        : 'Database unavailable'
-
   if (authState === 'loading') {
     return (
       <main className="auth-loading">
@@ -1101,7 +1110,6 @@ function App() {
     return (
       <AuthScreen
         onAuthenticated={handleAuthenticated}
-        backendStatus={backendStatus}
         initialError={authError}
         onRetry={() => setBootstrapRetry((v) => v + 1)}
         onRequestError={(error) => {
@@ -1405,18 +1413,31 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div className="topbar-leading">
-            <button
-              className="icon-button desktop-sidebar-toggle"
-              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            <div
+              className={`sidebar-toggle-hover-zone ${isNearToggle ? 'is-near' : ''}`}
+              onMouseEnter={() => setIsNearToggle(true)}
+              onMouseLeave={() => setIsNearToggle(false)}
             >
-              {sidebarCollapsed ? (
-                <PanelLeftOpen size={19} />
-              ) : (
-                <PanelLeftClose size={19} />
-              )}
-            </button>
+              <button
+                className="icon-button desktop-sidebar-toggle"
+                aria-label={sidebarCollapsed ? 'Show chat history' : 'Hide chat history'}
+                title={
+                  sidebarCollapsed
+                    ? `Show chat history (${SHORTCUT_MODIFIER} B)`
+                    : `Hide chat history (${SHORTCUT_MODIFIER} B)`
+                }
+                onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              >
+                {sidebarCollapsed ? (
+                  <PanelLeftOpen size={19} />
+                ) : (
+                  <PanelLeftClose size={19} />
+                )}
+              </button>
+              <span className="sidebar-toggle-tooltip" role="tooltip">
+                {sidebarCollapsed ? 'Show history' : 'Hide history'}
+              </span>
+            </div>
             <button
               className="icon-button mobile-menu-button"
               aria-label="Open navigation"
@@ -1431,14 +1452,6 @@ function App() {
               <strong>Academic Assistant</strong>
               <span>Your AI academic companion</span>
             </div>
-          </div>
-          <div className={`connection-status status-${backendStatus}`}>
-            <span className="connection-dot" />
-            <span>{connectedLabel}</span>
-          </div>
-          <div className={`connection-status status-${databaseStatus}`}>
-            <span className="connection-dot" />
-            <span>{databaseLabel}</span>
           </div>
         </header>
 
@@ -1630,7 +1643,8 @@ function App() {
                           <>
                             <div className="markdown-body">
                               <ReactMarkdown
-                                remarkPlugins={[remarkGfm]}
+                                remarkPlugins={[remarkGfm, remarkMath]}
+                                rehypePlugins={[rehypeKatex]}
                                 components={{
                                   code({ children, className, ...props }) {
                                     const languageMatch =
@@ -1668,7 +1682,7 @@ function App() {
                                   },
                                 }}
                               >
-                                {message.content}
+                                {formatMathInMarkdown(message.content)}
                               </ReactMarkdown>
                             </div>
                             {message.sources?.length > 0 && (
@@ -1882,8 +1896,8 @@ function App() {
                 <span>PDF and TXT · up to 10 MB per file</span>
               </div>
               <div>
-                <strong>Backend</strong>
-                <span>{connectedLabel}</span>
+                <strong>AI Provider</strong>
+                <span>Groq Cloud API</span>
               </div>
             </div>
             <p className="about-branding">

@@ -499,6 +499,20 @@ def chat(
     else:
         db.commit()
 
+    # Load recent conversation history (excluding the current user question)
+    prior_messages = db.scalars(
+        select(Message)
+        .where(
+            Message.conversation_id == conversation.id,
+            Message.sequence_number < sequence,
+        )
+        .order_by(Message.sequence_number.asc())
+    ).all()
+    history = [
+        {"role": msg.role, "content": msg.content}
+        for msg in prior_messages[-6:]
+    ]
+
     try:
         answer_result = answer_question(
             question,
@@ -506,6 +520,7 @@ def chat(
             owner_id=user.id,
             include_sources=True,
             db=db,
+            history=history,
         )
         if isinstance(answer_result, tuple):
             answer, sources = answer_result

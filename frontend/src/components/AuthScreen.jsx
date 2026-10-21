@@ -5,7 +5,6 @@ import './AuthScreen.css'
 
 export default function AuthScreen({
   onAuthenticated,
-  backendStatus,
   initialError,
   onRequestError,
   onRetry,
@@ -175,7 +174,7 @@ export default function AuthScreen({
             <button
               className="auth-submit"
               type="submit"
-              disabled={submitting || backendStatus === 'offline'}
+              disabled={submitting}
             >
               {submitting ? (
                 <>

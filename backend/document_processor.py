@@ -19,8 +19,12 @@ def extract_pages_from_file(file_path):
         except pymupdf.FileDataError as error:
             raise ValueError("The uploaded PDF is damaged or invalid.") from error
     if file_path.suffix.lower() == ".txt":
-        with file_path.open("r", encoding="utf-8-sig") as source_file:
-            return [(1, source_file.read())]
+        try:
+            with file_path.open("r", encoding="utf-8-sig") as source_file:
+                return [(1, source_file.read())]
+        except UnicodeDecodeError:
+            with file_path.open("r", encoding="latin-1", errors="replace") as source_file:
+                return [(1, source_file.read())]
     raise ValueError("Only PDF and TXT files are supported.")
 
 

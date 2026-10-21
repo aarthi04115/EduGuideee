@@ -35,16 +35,51 @@ def load_academic_index():
         return chunks, index
 
 
+COLLEGE_KEYWORDS = {
+    "sairam",
+    "college",
+    "campus",
+    "department",
+    "departments",
+    "faculty",
+    "hod",
+    "admission",
+    "admissions",
+    "placement",
+    "placements",
+    "hostel",
+    "fees",
+    "fee",
+    "circular",
+    "principal",
+    "autonomous",
+    "anna university",
+    "regulation",
+    "regulations",
+    "exam",
+    "exams",
+    "coe",
+    "transport",
+    "bus",
+    "library",
+    "curriculum",
+}
+
+
 def answer_question(
     question: str,
     document_ids=None,
     owner_id=None,
     include_sources=False,
     db=None,
+    history=None,
 ):
-    college_context, college_sources = retrieve_college_context(
-        question, db
-    )
+    # Only retrieve institution-specific website context if the question touches college topics
+    is_college_query = any(keyword in question.lower() for keyword in COLLEGE_KEYWORDS)
+    if is_college_query:
+        college_context, college_sources = retrieve_college_context(question, db)
+    else:
+        college_context, college_sources = "", []
 
     if document_ids:
         if owner_id is None:
@@ -63,36 +98,20 @@ def answer_question(
             question,
             personal_context,
             college_context=college_context,
+            history=history,
+            materials_selected=True,
         )
         sources = personal_sources + college_sources
-
         return (answer, sources) if include_sources else answer
 
-    chunks, index = load_academic_index()
-
-    if index is None or not chunks:
-        context = ""
-    else:
-        query_embedding = create_embeddings([question])
-
-        _, indices = search(
-            index,
-            query_embedding,
-            top_k=min(3, len(chunks)),
-        )
-
-        retrieved_chunks = [
-            chunks[i]
-            for i in indices[0]
-            if 0 <= i < len(chunks)
-        ]
-
-        context = "\n\n".join(retrieved_chunks)
-
+    # When no study materials are selected, answer directly from model's general academic knowledge
+    # without contaminating the prompt with unrelated sample documents
     answer = ask_llm(
         question,
-        context,
+        context="",
         college_context=college_context,
+        history=history,
+        materials_selected=False,
     )
 
     return (answer, college_sources) if include_sources else answer
