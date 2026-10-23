@@ -745,7 +745,12 @@ async def upload_document(
             from document_processor import extract_pages_from_file
 
             pages = await asyncio.to_thread(extract_pages_from_file, stored_path)
-        except (UnicodeDecodeError, OSError, ValueError) as error:
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail=str(error),
+            ) from error
+        except (UnicodeDecodeError, OSError) as error:
             raise HTTPException(
                 status_code=422,
                 detail="EduGuide could not read this file. Check that it is not damaged or password-protected.",

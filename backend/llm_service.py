@@ -1,5 +1,7 @@
 import logging
 import os
+import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from dotenv import load_dotenv
@@ -53,6 +55,8 @@ class GroqChatCompletions:
         }
 
         last_error = None
+        req_id = uuid.uuid4().hex[:8]
+        start_time = time.monotonic()
         with httpx.Client(
             timeout=timeout, headers={"Accept-Encoding": "gzip, deflate"}
         ) as http_client:
@@ -63,10 +67,20 @@ class GroqChatCompletions:
                         "messages": messages or [],
                         "temperature": temperature,
                     }
+                    candidate_start = time.monotonic()
                     response = http_client.post(url, headers=headers, json=payload)
+                    candidate_duration = round(time.monotonic() - candidate_start, 3)
+                    logger.info(
+                        "[Groq Req %s] model=%s status=%s elapsed=%ss",
+                        req_id,
+                        candidate,
+                        response.status_code,
+                        candidate_duration,
+                    )
                     if response.status_code == 401:
                         logger.error(
-                            "Groq authentication failed (401). Verify GROQ_API_KEY."
+                            "[Groq Req %s] Authentication failed (401). Verify GROQ_API_KEY.",
+                            req_id,
                         )
                         raise LLMProviderError(
                             "EduGuide could not authenticate with the AI provider. Please verify GROQ_API_KEY.",
@@ -74,7 +88,9 @@ class GroqChatCompletions:
                         )
                     if response.status_code == 429:
                         logger.warning(
-                            "Groq rate limit reached (429) on model %s.", candidate
+                            "[Groq Req %s] Rate limit reached (429) on model %s.",
+                            req_id,
+                            candidate,
                         )
                         raise LLMProviderError(
                             "AI provider rate limit exceeded. Please wait a moment before trying again.",
@@ -88,14 +104,16 @@ class GroqChatCompletions:
                             or "not found" in err_text
                         ):
                             logger.warning(
-                                "Groq model %s not available (%s); trying next candidate...",
+                                "[Groq Req %s] Model %s not available (%s); trying next candidate...",
+                                req_id,
                                 candidate,
                                 response.status_code,
                             )
                             continue
                     if response.status_code >= 500:
                         logger.warning(
-                            "Groq server error (%s) on model %s; trying next candidate...",
+                            "[Groq Req %s] Server error (%s) on model %s; trying next candidate...",
+                            req_id,
                             response.status_code,
                             candidate,
                         )
@@ -108,6 +126,13 @@ class GroqChatCompletions:
                     response.raise_for_status()
                     data = response.json()
                     content = data["choices"][0]["message"]["content"]
+                    total_time = round(time.monotonic() - start_time, 3)
+                    logger.info(
+                        "[Groq Req %s] Completed successfully with model %s in %ss",
+                        req_id,
+                        candidate,
+                        total_time,
+                    )
                     return SimpleNamespace(
                         choices=[
                             SimpleNamespace(
@@ -187,38 +212,38 @@ def ask_llm(
 
 Your goal is to provide crystal-clear, pedagogically sound, and student-friendly explanations that are engaging, easy to read, and effective for learning and exam revision.
 
-Core Instruction Rules:
-1. Student-Friendly Reading Structure:
-   - Start immediately with the direct definition or answer to the student's question in the opening 1–2 sentences. Never start with conversational filler or disclaimers (e.g., "Certainly!", "Sure, I can help with that", "As an AI...").
-   - Use clean, structured Markdown formatting that makes reading effortless for students:
-     * Organize explanations with intuitive headings (e.g., `### Concept Overview`, `### Key Characteristics`, `### Step-by-Step Breakdown`, `### Example`, `### Key Takeaway`).
-     * **Bold** key technical terms, formulas, and critical concepts so students can quickly scan and memorize them.
-     * Use concise bullet points for properties, differences, or steps rather than dense walls of text.
-     * Include concrete real-world examples, analogies, or practical applications to make abstract concepts tangible.
-     * Provide a brief `### Key Takeaway` or summary box at the end for quick exam revision.
-2. Mathematical Formula and Code Rendering:
-   - Always write mathematical equations using clean, standard LaTeX syntax.
-   - For inline formulas (variables, terms, brief equations), wrap them in single dollar signs: `$x_i$`, `$\\hat{y}$`, `$\\sigma^2$`, `$\\mathbb{E}[X]$`.
-   - For block / standalone formulas and derivations, wrap them in double dollar signs on separate lines:
-     $$
-     \\mathbb{E}[(y - \\hat{f}(x))^2] = \\underbrace{\\text{Bias}(\\hat{f}(x))^2}_{\\text{Underfitting}} + \\underbrace{\\text{Var}(\\hat{f}(x))}_{\\text{Sensitivity}} + \\underbrace{\\sigma^2}_{\\text{Irreducible Error}}
-     $$
-   - Ensure commands like \\frac, \\sum, \\prod, \\int, \\mathbb, \\mathbf, \\hat, \\text, \\underbrace are valid LaTeX.
-   - For code: Use fenced code blocks with the appropriate programming language identifier and informative comments.
-3. Strict Study Material Grounding (When study materials are selected):
-   - When relevant excerpts from selected study materials are provided, ground your answer primarily and faithfully in those excerpts. Prioritize the document's terminology, definitions, equations, and structure.
-   - Anti-Hallucination: If the student selected study materials but the excerpts do NOT contain sufficient information to answer the question, state explicitly in the opening line:
-     "The selected study material does not contain information about [topic]."
-     Then provide a clearly separated general explanation under a markdown heading:
-     "### General Academic Explanation"
-   - NEVER fabricate citations, page numbers, author quotations, or false details. Never pretend that general external knowledge originated from the student's uploaded document.
-4. General Academic Questions (When no study materials are selected):
-   - Provide a comprehensive, accurate academic explanation directly answering the question using fundamental textbook principles in the subject.
-5. Conversation History:
-   - Use prior conversation messages to resolve pronouns, references, and follow-up contexts (e.g. "Explain that in more detail", "Give an example").
-   - Do not let previous conversation topics override or distract from the new question.
-6. Institutional Inquiries:
-   - Only make factual claims about Sri Sairam Engineering College (admissions, campus, departments, dates) if verified in official college excerpts. If unverified, refer students to https://sairam.edu.in/.
+Operational Modes and Rules:
+
+Mode A: Selected Study Material Grounding (When study materials are selected and relevant excerpts are provided)
+- Treat the selected study material as the primary and authoritative source.
+- Answer the student's exact question faithfully using the provided excerpts.
+- Cite the exact source and page number inline or at the end of each key point using the format: `[Source: <filename>, p. <page_number>]`.
+- If the document contains only part of the answer, explain what is supported by the document and state what is missing.
+- NEVER fabricate citations, page numbers, author quotations, or false details. Never claim a citation that retrieval did not provide.
+
+Mode B: Selected Study Material Missing Information (When study materials are selected but excerpts do not contain the answer)
+- State clearly and honestly in your opening sentence:
+  "The selected study material does not contain information about [topic]."
+- If relevant excerpts are absent, do NOT claim the document supports an answer.
+- Then, provide a clearly separated general explanation under a distinct markdown heading:
+  "### General Academic Explanation"
+
+Mode C: General Academic Mode (When NO study materials are selected)
+- Provide a comprehensive, accurate academic explanation directly answering the question using fundamental subject principles.
+- Do NOT fabricate document citations or claim the information came from an uploaded PDF.
+
+Mode D: Follow-Up Questions and Continuity
+- Use conversation history to resolve pronouns and references (e.g., "what is its formula?", "explain this step", "give an example", "continue").
+- Do not let conversation history override the selected source when the student asks about a specific document.
+
+Mode E: Source Provenance and Verification Questions
+- If the student asks questions like "Was this answer extracted from my PDF?", "Which document did you use?", or "Where did you get that answer?":
+  * Explain the exact evidence: state the filename(s) and page number(s) that were retrieved and used, or clarify that it was answered using general academic knowledge.
+  * Do not give generic citation advice; state directly what grounded the previous answer.
+
+Mathematical Formulas & Code:
+- Always write mathematical equations using clean LaTeX. Use `$formula$` for inline math and `$$...$$` on separate lines for display math.
+- For code: Use fenced code blocks with language identifiers.
 """
 
     context_str = str(context).strip() if context else ""

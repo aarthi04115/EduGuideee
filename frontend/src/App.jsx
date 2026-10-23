@@ -185,10 +185,10 @@ function mergeServerConversations(serverConversations, currentConversations) {
       ...mapServerConversation(item),
       ...(existing?.loaded
         ? {
-            messages: existing.messages,
-            attachments: existing.attachments,
-            loaded: true,
-          }
+          messages: existing.messages,
+          attachments: existing.attachments,
+          loaded: true,
+        }
         : {}),
     }
   })
@@ -612,8 +612,8 @@ function App() {
     setSelectedDocumentIds(
       conversation?.loaded
         ? conversation.attachments
-            .filter((document) => document.status === 'indexed')
-            .map((document) => document.id)
+          .filter((document) => document.status === 'indexed')
+          .map((document) => document.id)
         : [],
     )
     setSidebarOpen(false)
@@ -720,12 +720,12 @@ function App() {
         messages: conversation.messages.map((message) =>
           message.id === messageId
             ? {
-                ...message,
-                content: response.answer || 'EduGuide returned an empty answer.',
-                sources: response.sources ?? [],
-                pending: false,
-                isError: false,
-              }
+              ...message,
+              content: response.answer || 'EduGuide returned an empty answer.',
+              sources: response.sources ?? [],
+              pending: false,
+              isError: false,
+            }
             : message,
         ),
       }))
@@ -766,12 +766,12 @@ function App() {
         messages: conversation.messages.map((message) =>
           message.id === messageId
             ? {
-                ...message,
-                content: displayMessage,
-                pending: false,
-                isError: true,
-                question,
-              }
+              ...message,
+              content: displayMessage,
+              pending: false,
+              isError: true,
+              question,
+            }
             : message,
         ),
       }))
@@ -1015,11 +1015,11 @@ function App() {
           attachments: current.attachments.map((attachment) =>
             attachment.id === optimisticAttachment.id
               ? {
-                  ...attachment,
-                  status: 'failed',
-                  error: error.message,
-                  temporary: true,
-                }
+                ...attachment,
+                status: 'failed',
+                error: error.message,
+                temporary: true,
+              }
               : attachment,
           ),
         }))
@@ -1207,11 +1207,10 @@ function App() {
           <div className="conversation-list">
             {filteredConversations.map((conversation) => (
               <div
-                className={`conversation-row ${
-                  conversation.id === (activeId ?? activeConversation?.id)
+                className={`conversation-row ${conversation.id === (activeId ?? activeConversation?.id)
                     ? 'is-active'
                     : ''
-                }`}
+                  }`}
                 key={conversation.id}
               >
                 <button
@@ -1483,15 +1482,6 @@ function App() {
                     Select a saved conversation or start a new chat to begin.
                   </p>
                 )}
-                {backendStatus === 'offline' && (
-                  <div className="connection-alert" role="alert">
-                    <AlertCircle size={17} />
-                    <span>
-                      Unable to connect to EduGuide. Start the backend at
-                      localhost:8000, then try again.
-                    </span>
-                  </div>
-                )}
                 <div className="suggestion-grid">
                   {SUGGESTIONS.map((suggestion) => (
                     <button
@@ -1570,7 +1560,7 @@ function App() {
                               )}
                             </div>
                             {attachment.status === 'uploading' ||
-                            attachment.status === 'processing' ? (
+                              attachment.status === 'processing' ? (
                               <LoaderCircle
                                 className="spin"
                                 size={17}
@@ -1612,9 +1602,8 @@ function App() {
                         <span>{formatMessageTime(message.createdAt)}</span>
                       </div>
                       <div
-                        className={`message-bubble ${
-                          message.isError ? 'message-error' : ''
-                        }`}
+                        className={`message-bubble ${message.isError ? 'message-error' : ''
+                          }`}
                       >
                         {message.pending ? (
                           <div className="thinking-indicator" aria-live="polite">
@@ -1758,36 +1747,6 @@ function App() {
                   aria-label="Stop using selected materials"
                 >
                   <X size={14} />
-                </button>
-              </div>
-            )}
-            {backendStatus === 'offline' && hasMessages && (
-              <div className="composer-offline" role="status">
-                <AlertCircle size={15} />
-                <span>Backend unavailable · Your message cannot be sent yet.</span>
-                <button
-                  type="button"
-                  style={{
-                    marginLeft: '8px',
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid currentColor',
-                    background: 'transparent',
-                    color: 'inherit',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                  }}
-                  onClick={async () => {
-                    try {
-                      await checkBackendHealth()
-                      setBackendStatus('online')
-                      setDatabaseStatus('online')
-                    } catch {
-                      // still offline
-                    }
-                  }}
-                >
-                  Retry
                 </button>
               </div>
             )}

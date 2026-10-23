@@ -41,11 +41,14 @@ class StudyMaterial:
         return result
 
 
-MAX_CACHED_MATERIALS = 2
-MAX_DOCUMENT_CHUNKS = 400
+MAX_CACHED_MATERIALS = 4
+MAX_DOCUMENT_CHUNKS = 1200
 _materials: OrderedDict[str, StudyMaterial] = OrderedDict()
 _materials_lock = RLock()
-MAX_RETRIEVAL_DISTANCE = 1.3
+# FAISS IndexFlatL2 returns squared Euclidean distance: ||u - v||^2
+# For normalized vectors, ||u - v||^2 = 2 - 2*cos(theta).
+# Threshold of 1.55 squared distance corresponds to cosine similarity of 0.225 (L2 distance ~1.24).
+MAX_RETRIEVAL_DISTANCE = 1.55
 
 
 def _remember_material(material):
@@ -202,6 +205,22 @@ def retrieve_context(question, document_ids, owner_id):
     return context
 
 
+import re
+from collections import Counter
+
+
+def _keyword_overlap(query: str, text: str) -> float:
+    query_terms = set(re.findall(r"\b[a-zA-Z0-9_]{3,}\b", query.lower()))
+    if not query_terms:
+        return 0.0
+    text_words = re.findall(r"\b[a-zA-Z0-9_]{3,}\b", text.lower())
+    if not text_words:
+        return 0.0
+    counts = Counter(text_words)
+    overlap = sum(counts[term] for term in query_terms if term in counts)
+    return float(overlap)
+
+
 def retrieve_context_with_sources(question, document_ids, owner_id, db=None):
     query_embedding = create_embeddings([question])
     context_parts = []
@@ -222,27 +241,64 @@ def retrieve_context_with_sources(question, document_ids, owner_id, db=None):
             if material is None:
                 raise ValueError("A selected study material is not available.")
 
-            top_k = min(3, len(material.chunks))
+            total_chunks = len(material.chunks)
+            if total_chunks == 0:
+                continue
+
+            # 1. Semantic vector search
+            top_k_vector = min(8, total_chunks)
             distances, indices = search(
                 material.index,
                 query_embedding,
-                top_k=top_k,
+                top_k=top_k_vector,
             )
-            for distance, chunk_index in zip(distances[0], indices[0]):
-                if (
-                    0 <= chunk_index < len(material.chunks)
-                    and float(distance) <= MAX_RETRIEVAL_DISTANCE
-                ):
-                    page_number = material.page_numbers[chunk_index]
-                    context_parts.append(
-                        f"Study material: {material.filename}, page {page_number}\n"
-                        f"{material.chunks[chunk_index]}"
-                    )
-                    source = {
-                        "id": material.document_id,
-                        "filename": material.filename,
-                        "page_number": page_number,
-                    }
-                    if source not in sources:
-                        sources.append(source)
+
+            # Map chunk_idx -> score (higher is better)
+            scored_candidates: dict[int, float] = {}
+
+            for dist, idx in zip(distances[0], indices[0]):
+                if 0 <= idx < total_chunks:
+                    sq_dist = float(dist)
+                    if sq_dist <= MAX_RETRIEVAL_DISTANCE:
+                        # Convert squared distance to similarity score in [0, 1]
+                        sim = max(0.0, 1.0 - (sq_dist / 2.0))
+                        scored_candidates[idx] = sim * 1.5
+
+            # 2. Keyword lexical overlap boost
+            for idx, chunk_text in enumerate(material.chunks):
+                kw_score = _keyword_overlap(question, chunk_text)
+                if kw_score > 0:
+                    current_score = scored_candidates.get(idx, 0.0)
+                    boost = min(kw_score * 0.3, 2.0)
+                    scored_candidates[idx] = current_score + boost
+
+            # 3. Filter candidates: must have meaningful semantic match (within MAX_RETRIEVAL_DISTANCE) or keyword overlap
+            valid_candidates = {
+                idx: score
+                for idx, score in scored_candidates.items()
+                if score >= 0.35
+            }
+
+            # Sort best candidates and select top chunks (up to 5 per document)
+            best_chunk_indices = sorted(
+                valid_candidates.keys(),
+                key=lambda i: valid_candidates[i],
+                reverse=True,
+            )[:5]
+
+            # Preserve chronological/reading order for context coherence
+            for chunk_index in sorted(best_chunk_indices):
+                page_number = material.page_numbers[chunk_index]
+                context_parts.append(
+                    f"Study material: {material.filename}, page {page_number}\n"
+                    f"{material.chunks[chunk_index]}"
+                )
+                source = {
+                    "id": material.document_id,
+                    "filename": material.filename,
+                    "page_number": page_number,
+                }
+                if source not in sources:
+                    sources.append(source)
     return "\n\n".join(context_parts), sources
+
